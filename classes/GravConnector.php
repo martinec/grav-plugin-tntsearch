@@ -2,6 +2,7 @@
 namespace Grav\Plugin\TNTSearch;
 
 use Grav\Common\Grav;
+use Grav\Common\Language\Language;
 use Grav\Common\Page\Page;
 use Symfony\Component\Yaml\Yaml;
 
@@ -27,8 +28,6 @@ class GravConnector extends \PDO
         $default_process = $config->get('plugins.tntsearch.index_page_by_default');
         $gtnt = new GravTNTSearch();
 
-
-
         if ($filter && array_key_exists('items', $filter)) {
 
             if (is_string($filter['items'])) {
@@ -42,11 +41,18 @@ class GravConnector extends \PDO
             $collection->published()->routable();
         }
 
+        $langs = Grav::instance()['language']->getLanguages();
+
+        if (!count($langs)) {
+            // undetermined according to the ISO 639-2 standard
+            // @see http://www.loc.gov/standards/iso639-2/faq.html#25
+            $langs = [ 'und' ];
+        }
+
         foreach ($collection as $page) {
-            $counter++;
             $process = $default_process;
             $header = $page->header();
-            $route = $page->route();
+            $route = $page->rawRoute();
 
             if (isset($header->tntsearch['process'])) {
                 $process = $header->tntsearch['process'];
@@ -59,9 +65,15 @@ class GravConnector extends \PDO
             }
 
             try {
-                $fields = $gtnt->indexPageData($page);
-                $results[] = (array) $fields;
-                echo("Added $counter $route\n");
+                foreach ($langs as $lang) {
+                    $translated_page = GravTNTSearch::newTranslatedPage($page->rawRoute(), $lang);
+                    if($translated_page) {
+                        $fields = $gtnt->indexPageData($translated_page, $lang);
+                        $results[] = (array) $fields;
+                        $counter++;
+                        echo("Added $counter [$lang] " . $translated_page->rawRoute() . "\n");
+                    }
+                }
             } catch (\Exception $e) {
                 echo("Skipped $counter $route\n");
                 continue;
@@ -72,4 +84,3 @@ class GravConnector extends \PDO
     }
 
 }
-

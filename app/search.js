@@ -9,6 +9,7 @@ export const DEFAULTS = {
     snippet: 300,
     min: 3,
     search_type: 'auto',
+    langs: '',
     in_page: false,
     live_update: true,
 };
@@ -63,6 +64,7 @@ const throttling = throttle(async ({ input, results, historyValue = false } = {}
         l: data.limit,
         sl: data.snippet,
         search_type: data.search_type,
+        langs: data.langs,
         ajax: true,
     };
 

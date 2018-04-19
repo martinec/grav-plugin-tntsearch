@@ -8,11 +8,16 @@
         {% endif %}
     </p>
     {% for key, val in tntsearch_results.hits  %}
+        {% if not val.lang or val.lang == grav.language.getLanguage() %}
+            {% set page_route = val.link %}
+        {% else %}
+            {% set page_route = '/' ~ val.lang ~ val.link %}
+        {% endif %}
         <h5 class="title">
-            <a href="{{ base_url ~ val.link }}">{{ val.title }}</a>
+            <a href="{{ base_url_simple ~ page_route }}">{{ val.title }}</a>
         </h5>
         {% if config.get('plugins.tntsearch.display_route') %}
-            <h6 class="route">{{ val.link }}</h6>
+            <h6 class="route">{{ page_route }}</h6>
         {% endif %}
         <p>{{ val.content }}</p>
     {% endfor %}

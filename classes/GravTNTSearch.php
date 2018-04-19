@@ -2,6 +2,7 @@
 namespace Grav\Plugin\TNTSearch;
 
 use Grav\Common\Grav;
+use Grav\Common\Language\Language;
 use Grav\Common\Page\Collection;
 use Grav\Common\Page\Page;
 use RocketTheme\Toolbox\Event\Event;
@@ -18,6 +19,7 @@ class GravTNTSearch
     public function __construct($options = [])
     {
         $search_type = Grav::instance()['config']->get('plugins.tntsearch.search_type');
+        $lang = Grav::instance()['language']->getLanguage();
         $stemmer = Grav::instance()['config']->get('plugins.tntsearch.stemmer');
         $data_path = Grav::instance()['locator']->findResource('user://data', true) . '/tntsearch';
 
@@ -28,6 +30,7 @@ class GravTNTSearch
         $defaults = [
             'json' => false,
             'search_type' => $search_type,
+            'langs' => $lang,
             'stemmer' => $stemmer,
             'limit' => 20,
             'as_you_type' => true,
@@ -53,6 +56,10 @@ class GravTNTSearch
             $this->tnt->fuzziness = true;
         }
 
+        if ($uri->query('langs')) {
+            $this->options['langs'] = $uri->query('langs');
+        }
+
         $limit = intval($this->options['limit']);
         $type = isset($type) ? $type : $this->options['search_type'];
 
@@ -66,7 +73,6 @@ class GravTNTSearch
                 }
             }
         }
-
 
         switch ($type) {
             case 'basic':
@@ -92,26 +98,88 @@ class GravTNTSearch
         return $this->processResults($results, $query);
     }
 
+    /**
+     * Gets the translated version of a page based on its route and a language
+     *
+     * @param  string $route Route to the page.
+     * @param  string $lang Optional language code or the active language if null.
+     *
+     * @return string  The translated Page if available|null.
+     */
+    public static function newTranslatedPage($route, $lang = null)
+    {
+        $pages = Grav::instance()['pages'];
+        $page = $pages->dispatch($route);
+
+        if (!$page) {
+            return null;
+        }
+
+        if (!$lang) {
+            $lang = Grav::instance()['language']->getActive();
+        }
+
+        if ($lang == 'und' || !$page->language() || $page->language() == $lang) {
+            return clone $page;
+        }
+
+        $page_name_without_ext = substr($page->name(), 0, -(strlen($page->extension())));
+        $translated_page_path = $page->path() . DS . $page_name_without_ext . '.' . $lang . '.md';
+
+        if (!file_exists($translated_page_path)) {
+            return null;
+        }
+
+        $translated_page  = new Page();
+        $translated_page->init(new \SplFileInfo($translated_page_path), $lang . '.md');
+
+        $the_translated_parent = $translated_page;
+        $the_parent = $page->parent();
+
+        while ($the_parent !== null) {
+            $page_name_without_ext = substr($the_parent->name(), 0, -(strlen($the_parent->extension())));
+            $translated_page_path = $the_parent->path() . DS . $page_name_without_ext . '.' . $lang . '.md';
+
+            if (file_exists($translated_page_path)) {
+                $aPage = new Page();
+                $aPage->init(new \SplFileInfo($translated_page_path), $lang . '.md');
+            } else {
+                $aPage = $the_parent;
+            }
+
+            $the_translated_parent->parent($aPage);
+            $the_translated_parent = $aPage;
+
+            $the_parent = $the_parent->parent();
+        }
+
+        return $translated_page;
+    }
+
     protected function processResults($res, $query)
     {
         $counter = 0;
         $data = new \stdClass();
-        $data->number_of_hits = isset($res['hits']) ? $res['hits'] : 0;
         $data->execution_time = $res['execution_time'];
         $pages = Grav::instance()['pages'];
 
-        foreach ($res['ids'] as $path) {
-
-            if ($counter++ > $this->options['limit']) {
+        foreach ($res['ids'] as $id) {
+            if ($counter > $this->options['limit']) {
                 break;
             }
 
-            $page = $pages->dispatch($path);
+            list($lang, $route) = explode(':', $id, 2);
 
-            if ($page) {
-                Grav::instance()->fireEvent('onTNTSearchQuery', new Event(['page' => $page, 'query' => $query, 'options' => $this->options, 'fields' => $data, 'gtnt' => $this]));
+            if (in_array($lang, explode(',', $this->options['langs']))) {
+                $translated_page = GravTNTSearch::newTranslatedPage($route, $lang);
+                if($translated_page) {
+                    Grav::instance()->fireEvent('onTNTSearchQuery', new Event(['page' => $translated_page, 'query' => $query, 'options' => $this->options, 'fields' => $data, 'gtnt' => $this]));
+                    $counter++;
+                }
             }
         }
+
+        $data->number_of_hits = $counter;
 
         if ($this->options['json']) {
             return json_encode($data, JSON_PRETTY_PRINT);
@@ -163,7 +231,7 @@ class GravTNTSearch
         $indexer = $this->tnt->getIndex();
 
         // Delete existing if it exists
-        $indexer->delete($page->route());
+        $indexer->delete(GravTNTSearch::getPageIndexId($page->rawRoute(), $page->language()));
     }
 
     public function updateIndex($page)
@@ -179,7 +247,7 @@ class GravTNTSearch
         $indexer = $this->tnt->getIndex();
 
         // Delete existing if it exists
-        $indexer->delete($page->route());
+        $indexer->delete(GravTNTSearch::getPageIndexId($page->rawRoute(), $page->language()));
 
         $filter = $config = Grav::instance()['config']->get('plugins.tntsearch.filter');
         if ($filter && array_key_exists('items', $filter)) {
@@ -201,11 +269,19 @@ class GravTNTSearch
             }
         }
     }
+    
+    public static function getPageIndexId($page, $lang)
+    {
+        if (!$lang) {
+            $lang = Grav::instance()['language']->getActive();
+        }
+        return $lang . ':' .$page->rawRoute();
+    }
 
-    public function indexPageData($page)
+    public function indexPageData($page, $lang)
     {
         $fields = new \stdClass();
-        $fields->id = $page->route();
+        $fields->id = GravTNTSearch::getPageIndexId($page, $lang);
         $fields->name = $page->title();
         $fields->content = $this->getCleanContent($page);
 

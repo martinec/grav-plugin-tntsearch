@@ -118,7 +118,8 @@ class TNTSearchPlugin extends Plugin
         }
 
         $fields->hits[] = [
-            'link' => $page->route(),
+            'link' => $page->rawRoute(),
+            'lang'  => $page->language() ?: '',
             'title' =>  $gtnt->tnt->highlight($title, $query, 'em', ['wholeWord' => false]),
             'content' =>  $gtnt->tnt->highlight($relevant, $query, 'em', ['wholeWord' => false]),
         ];
@@ -144,6 +145,7 @@ class TNTSearchPlugin extends Plugin
 
         $snippet = $this->getFormValue('sl');
         $limit = $this->getFormValue('l');
+        $langs = $this->getFormValue('langs');
 
         if ($snippet) {
             $options['snippet'] = $snippet;
